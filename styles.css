@@ -1,0 +1,146 @@
+.alp-embed {
+	margin: 0.5em 0;
+}
+
+.alp-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m);
+	max-width: 480px;
+}
+
+.alp-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.alp-btn,
+.alp-play-btn {
+	background: var(--interactive-normal);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: 0.85em;
+	line-height: 1.4;
+}
+
+.alp-btn:hover,
+.alp-play-btn:hover {
+	background: var(--interactive-hover);
+}
+
+.alp-play-btn {
+	min-width: 2.2em;
+	font-size: 1em;
+	padding: 4px 8px;
+}
+
+.alp-loop-toggle.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.alp-clear {
+	opacity: 0.75;
+}
+
+.alp-time-input {
+	width: 4.4em;
+	font-size: 0.8em;
+	font-variant-numeric: tabular-nums;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 3px 5px;
+	text-align: center;
+}
+
+.alp-time-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.alp-loop-row {
+	flex-wrap: wrap;
+	row-gap: 6px;
+}
+
+.alp-time {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	white-space: nowrap;
+	min-width: 5.5em;
+	text-align: right;
+}
+
+.alp-seek {
+	flex: 1;
+	min-width: 0;
+}
+
+.alp-speed-row {
+	gap: 10px;
+}
+
+.alp-speed-icon {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.alp-speed-slider {
+	flex: 1;
+	min-width: 0;
+}
+
+.alp-speed-label {
+	font-size: 0.85em;
+	font-weight: 600;
+	min-width: 2.6em;
+	text-align: right;
+	white-space: nowrap;
+}
+
+/* Range inputs: full-width click-and-drag targets, no focus ring clutter */
+.alp-controls input[type="range"] {
+	-webkit-appearance: none;
+	appearance: none;
+	height: 4px;
+	background: var(--background-modifier-border);
+	border-radius: 2px;
+	outline: none;
+}
+
+.alp-controls input[type="range"]::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--interactive-accent);
+	cursor: pointer;
+	margin-top: -5px;
+}
+
+.alp-controls input[type="range"]::-moz-range-thumb {
+	width: 14px;
+	height: 14px;
+	border: none;
+	border-radius: 50%;
+	background: var(--interactive-accent);
+	cursor: pointer;
+}
+
+.alp-controls input[type="range"]::-webkit-slider-runnable-track {
+	height: 4px;
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+}

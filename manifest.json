@@ -1,0 +1,10 @@
+{
+	"id": "audio-loop-player",
+	"name": "Audio Loop Player",
+	"version": "0.1.0",
+	"minAppVersion": "1.0.0",
+	"description": "Play mp3/m4a/wav files with A-B section looping and a draggable playback speed slider.",
+	"author": "Damian Evans",
+	"authorUrl": "",
+	"isDesktopOnly": false
+}
