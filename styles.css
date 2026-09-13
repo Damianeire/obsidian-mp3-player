@@ -19,7 +19,8 @@
 }
 
 .alp-btn,
-.alp-play-btn {
+.alp-play-btn,
+.alp-section-badge {
 	background: var(--interactive-normal);
 	color: var(--text-normal);
 	border: 1px solid var(--background-modifier-border);
@@ -28,17 +29,62 @@
 	cursor: pointer;
 	font-size: 0.85em;
 	line-height: 1.4;
+	box-shadow: none;
 }
 
 .alp-btn:hover,
-.alp-play-btn:hover {
+.alp-play-btn:hover,
+.alp-section-badge:hover {
 	background: var(--interactive-hover);
+}
+
+.alp-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.alp-btn:disabled:hover {
+	background: var(--interactive-normal);
+}
+
+/* Buttons that show a Lucide icon instead of text */
+.alp-icon-btn,
+.alp-play-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 7px;
+}
+
+.alp-icon-btn svg,
+.alp-play-btn svg {
+	width: 14px;
+	height: 14px;
 }
 
 .alp-play-btn {
 	min-width: 2.2em;
-	font-size: 1em;
-	padding: 4px 8px;
+	min-height: 2em;
+}
+
+.alp-play-btn svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* During the silent gap between loop repeats the play button pulses */
+.alp-controls.is-gap .alp-play-btn {
+	animation: alp-gap-pulse 1s ease-in-out infinite;
+}
+
+@keyframes alp-gap-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
 }
 
 .alp-loop-toggle.is-active {
@@ -47,30 +93,171 @@
 	border-color: var(--interactive-accent);
 }
 
-.alp-clear {
-	opacity: 0.75;
+.alp-loop-toggle.is-active:hover {
+	background: var(--interactive-accent-hover);
 }
 
-.alp-time-input {
-	width: 4.4em;
+.alp-time-input,
+.alp-number-input,
+.alp-section-name {
 	font-size: 0.8em;
-	font-variant-numeric: tabular-nums;
 	background: var(--background-primary);
 	color: var(--text-normal);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
 	padding: 3px 5px;
+	box-shadow: none;
+}
+
+.alp-time-input {
+	width: 4.4em;
+	font-variant-numeric: tabular-nums;
 	text-align: center;
 }
 
-.alp-time-input:focus {
+.alp-number-input {
+	width: 3.6em;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.alp-time-input:focus,
+.alp-number-input:focus,
+.alp-section-name:focus {
 	border-color: var(--interactive-accent);
 	outline: none;
+	box-shadow: none;
 }
 
 .alp-loop-row {
 	flex-wrap: wrap;
 	row-gap: 6px;
+}
+
+/* Pause-between-loops row */
+.alp-pause-row {
+	gap: 6px;
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.alp-pause-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.alp-pause-label input[type="checkbox"] {
+	margin: 0;
+}
+
+.alp-number-input:disabled {
+	opacity: 0.5;
+}
+
+.alp-unit {
+	white-space: nowrap;
+}
+
+/* Sections list */
+.alp-sections {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.alp-sections-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.alp-sections-title {
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	font-size: 0.9em;
+}
+
+.alp-sections-empty {
+	font-size: 0.8em;
+	color: var(--text-faint);
+	padding: 2px 4px;
+}
+
+.alp-section-list {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.alp-section {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 4px;
+	border-radius: var(--radius-s);
+	border: 1px solid transparent;
+}
+
+.alp-section.is-selected {
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border);
+}
+
+.alp-section-badge {
+	width: 1.9em;
+	height: 1.9em;
+	padding: 0;
+	border-radius: 50%;
+	font-size: 0.75em;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	flex-shrink: 0;
+}
+
+.alp-section.is-selected .alp-section-badge {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.alp-section-dash {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.alp-section-name {
+	flex: 1;
+	min-width: 3em;
+}
+
+.alp-sections-header-btns {
+	display: flex;
+	gap: 2px;
+}
+
+.alp-section .alp-icon-btn {
+	padding: 2px 3px;
+	opacity: 0.6;
+	background: transparent;
+	border-color: transparent;
+}
+
+.alp-section .alp-icon-btn:hover {
+	opacity: 1;
+	background: var(--interactive-hover);
+}
+
+.alp-section .alp-icon-btn:disabled {
+	opacity: 0.2;
+}
+
+.alp-section .alp-icon-btn:disabled:hover {
+	background: transparent;
 }
 
 .alp-time {
@@ -79,11 +266,16 @@
 	white-space: nowrap;
 	min-width: 5.5em;
 	text-align: right;
+	font-variant-numeric: tabular-nums;
 }
 
 .alp-seek {
 	flex: 1;
 	min-width: 0;
+}
+
+.alp-section.is-primary .alp-section-badge {
+	box-shadow: 0 0 0 2px var(--background-secondary), 0 0 0 3px var(--interactive-accent);
 }
 
 .alp-speed-row {
@@ -109,38 +301,180 @@
 	white-space: nowrap;
 }
 
-/* Range inputs: full-width click-and-drag targets, no focus ring clutter */
+/* Range inputs: full-width click-and-drag targets, thumb centred on the track.
+   Obsidian's own slider CSS nudges the thumb up with `top: var(--slider-thumb-y)`
+   (sized for its 18px thumb) and animates it with a transition, so both are
+   overridden here or the thumb rides above the line and lags the pointer. */
+.alp-controls {
+	--alp-thumb: 14px;
+	--alp-track: 4px;
+}
+
+.alp-slider-wrap {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+}
+
 .alp-controls input[type="range"] {
 	-webkit-appearance: none;
 	appearance: none;
-	height: 4px;
+	width: 100%;
+	height: var(--alp-track);
+	margin: 0;
+	padding: 0;
 	background: var(--background-modifier-border);
-	border-radius: 2px;
+	border-radius: calc(var(--alp-track) / 2);
 	outline: none;
+	cursor: pointer;
+}
+
+.alp-controls input[type="range"]::-webkit-slider-runnable-track {
+	height: var(--alp-track);
+	border-radius: calc(var(--alp-track) / 2);
+	background: var(--background-modifier-border);
 }
 
 .alp-controls input[type="range"]::-webkit-slider-thumb {
 	-webkit-appearance: none;
 	appearance: none;
-	width: 14px;
-	height: 14px;
+	width: var(--alp-thumb);
+	height: var(--alp-thumb);
 	border-radius: 50%;
+	border: none;
 	background: var(--interactive-accent);
-	cursor: pointer;
-	margin-top: -5px;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+	cursor: grab;
+	position: relative;
+	top: 0;
+	margin-top: calc((var(--alp-track) - var(--alp-thumb)) / 2);
+	transition: none;
+}
+
+.alp-controls input[type="range"]:active::-webkit-slider-thumb {
+	cursor: grabbing;
+	background: var(--interactive-accent-hover);
+}
+
+.alp-controls input[type="range"]::-moz-range-track {
+	height: var(--alp-track);
+	border-radius: calc(var(--alp-track) / 2);
+	background: var(--background-modifier-border);
 }
 
 .alp-controls input[type="range"]::-moz-range-thumb {
-	width: 14px;
-	height: 14px;
+	width: var(--alp-thumb);
+	height: var(--alp-thumb);
 	border: none;
 	border-radius: 50%;
 	background: var(--interactive-accent);
+	cursor: grab;
+}
+
+/* Section bands drawn on the seek bar, under the thumb */
+.alp-seek-marks {
+	position: absolute;
+	left: calc(var(--alp-thumb) / 2);
+	right: calc(var(--alp-thumb) / 2);
+	top: 50%;
+	height: var(--alp-track);
+	transform: translateY(-50%);
+	pointer-events: none;
+}
+
+.alp-seek-mark {
+	position: absolute;
+	top: -1px;
+	height: calc(var(--alp-track) + 2px);
+	min-width: 2px;
+	border-radius: 2px;
+	background: var(--text-faint);
+	opacity: 0.55;
+}
+
+.alp-seek-mark.is-selected {
+	background: var(--interactive-accent);
+	opacity: 0.9;
+}
+
+.alp-seek-wrap input[type="range"] {
+	position: relative;
+	background: transparent;
+	z-index: 1;
+}
+
+.alp-seek-wrap input[type="range"]::-webkit-slider-runnable-track {
+	background: transparent;
+}
+
+.alp-seek-wrap::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	height: var(--alp-track);
+	transform: translateY(-50%);
+	border-radius: calc(var(--alp-track) / 2);
+	background: var(--background-modifier-border);
+}
+
+/* Speed tick marks: a dot per step, labels on the round numbers */
+.alp-speed-row {
+	align-items: flex-start;
+}
+
+.alp-speed-icon,
+.alp-speed-label {
+	padding-top: 1px;
+}
+
+.alp-speed-wrap {
+	flex-direction: column;
+	align-items: stretch;
+	padding-bottom: 14px;
+}
+
+.alp-ticks {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: calc(var(--alp-thumb) / 2 + 4px);
+	height: 12px;
+	pointer-events: none;
+}
+
+.alp-tick {
+	position: absolute;
+	top: 0;
+	width: 1px;
+	height: 4px;
+	margin-left: -0.5px;
+	background: var(--text-faint);
+}
+
+.alp-tick.is-major {
+	height: 6px;
+	width: 2px;
+	margin-left: -1px;
+	background: var(--text-muted);
+}
+
+.alp-tick-label {
+	position: absolute;
+	top: 7px;
+	left: 50%;
+	transform: translateX(-50%);
+	font-size: 0.65em;
+	line-height: 1;
+	color: var(--text-muted);
+	white-space: nowrap;
+	pointer-events: auto;
 	cursor: pointer;
 }
 
-.alp-controls input[type="range"]::-webkit-slider-runnable-track {
-	height: 4px;
-	border-radius: 2px;
-	background: var(--background-modifier-border);
+.alp-tick-label:hover {
+	color: var(--text-normal);
 }
