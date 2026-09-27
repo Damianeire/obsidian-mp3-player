@@ -36,6 +36,35 @@ files opened in their own tab.
 - **Speed** — drag to change playback rate from 0.5× to 1.5× (pitch preserved).
   Tick marks show every step; click a label (0.5×, 0.75×, 1×, 1.5×) to jump to it.
 
+## Sections from a note (`loops` code block)
+
+A note can list sections for an audio file, e.g. as written by trad-split
+under each embed:
+
+````markdown
+![[Sessions/Set 1.m4a]]
+
+```loops
+file: Sessions/Set 1.m4a
+0:00 - 2:18 | Tune 1
+2:18 - 4:34.3 | Tune 2 ?
+```
+````
+
+- `file:` is the audio file's vault-relative path. Without it, the closest
+  audio embed above the block is used.
+- Each other line is `start - end | name`. Times count from the start of the
+  file and may be `m:ss`, `m:ss.s`, `h:mm:ss` or plain seconds. The name and
+  the end are optional. Names are shown exactly as written.
+- The block is drawn as a one-line status; the sections appear in the player.
+  If any line can't be read, nothing is loaded and the problems are listed.
+
+The note's sections are loaded when the file has no saved sections, and are
+reloaded whenever the note changes as long as the player's sections haven't
+been edited since the last load. Once you edit sections in the player, the
+note never overwrites them silently: the block says they differ and offers a
+**Use the note's sections** button. The plugin never writes to the note.
+
 ## Commands (bind to hotkeys in Settings → Hotkeys)
 
 All commands act on the player you most recently used:

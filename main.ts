@@ -1,4 +1,13 @@
-import { App, Plugin, PluginSettingTab, Setting, setIcon } from "obsidian";
+import {
+	App,
+	MarkdownPostProcessorContext,
+	normalizePath,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	setIcon,
+	TFile,
+} from "obsidian";
 
 const AUDIO_EXTENSIONS = ["mp3", "m4a", "wav"];
 
@@ -23,6 +32,11 @@ interface FileLoopState {
 	selected: number[];
 	/** The one section Set A / Set B / jump act on; always a member of `selected`. */
 	primary: number;
+	/**
+	 * The sections last loaded from a `loops` block in a note. Comparing against this
+	 * tells a note update (safe to apply) apart from the user's own edits in the player.
+	 */
+	noteSections?: LoopSection[];
 }
 
 interface AudioLoopPlayerSettings {
@@ -79,14 +93,65 @@ function formatTimeInput(seconds: number): string {
 	return `${m}:${s}`;
 }
 
-// Accepts "M:SS", "M:SS.s" or a plain number of seconds.
+// Accepts "M:SS", "M:SS.s", "H:MM:SS(.s)" or a plain number of seconds.
 function parseTimeInput(value: string): number | null {
 	const trimmed = value.trim();
 	if (!trimmed) return null;
-	const match = trimmed.match(/^(\d+):(\d+(?:\.\d+)?)$/);
-	if (match) return parseInt(match[1], 10) * 60 + parseFloat(match[2]);
-	const asSeconds = parseFloat(trimmed);
-	return isNaN(asSeconds) ? null : asSeconds;
+	const match = trimmed.match(/^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/);
+	if (match) return parseInt(match[1] ?? "0", 10) * 3600 + parseInt(match[2], 10) * 60 + parseFloat(match[3]);
+	if (!/^\d+(?:\.\d+)?$/.test(trimmed)) return null;
+	return parseFloat(trimmed);
+}
+
+/** Identity of a section list, for telling whether two lists are the same. */
+function sectionsKey(sections: LoopSection[]): string {
+	return JSON.stringify(sections.map((s) => [s.name, s.start, s.end]));
+}
+
+function copySections(sections: LoopSection[]): LoopSection[] {
+	return sections.map((s) => ({ name: s.name, start: s.start, end: s.end }));
+}
+
+interface LoopsBlock {
+	/** Vault-relative path from the `file:` line, if there was one. */
+	file: string | null;
+	sections: LoopSection[];
+	errors: string[];
+}
+
+/**
+ * Parses a `loops` code block:
+ *
+ *     file: Sessions/Set 1.m4a
+ *     0:00 - 2:18 | Tune 1
+ *     2:18 - 4:34.3 | Tune 2 ?
+ *
+ * The name (after `|`) and the end time are optional.
+ */
+function parseLoopsBlock(source: string): LoopsBlock {
+	const block: LoopsBlock = { file: null, sections: [], errors: [] };
+	source.split("\n").forEach((raw, i) => {
+		const line = raw.trim();
+		if (!line) return;
+		const fileMatch = line.match(/^file\s*:\s*(.+)$/i);
+		if (fileMatch) {
+			block.file = fileMatch[1].trim();
+			return;
+		}
+		const match = line.match(/^([\d:.]+)\s*[-–—]\s*([\d:.]*)\s*(?:\|(.*))?$/);
+		const start = match ? parseTimeInput(match[1]) : null;
+		const end = match && match[2] ? parseTimeInput(match[2]) : null;
+		if (!match || start === null || (match[2] && end === null)) {
+			block.errors.push(`Line ${i + 1}: can't read "${line}"`);
+			return;
+		}
+		if (end !== null && end <= start) {
+			block.errors.push(`Line ${i + 1}: end is not after start`);
+			return;
+		}
+		block.sections.push({ name: (match[3] ?? "").trim(), start, end });
+	});
+	return block;
 }
 
 /**
@@ -96,6 +161,8 @@ function parseTimeInput(value: string): number | null {
 class AudioControls {
 	/** The player most recently created or interacted with; commands/hotkeys are routed here. */
 	static active: AudioControls | null = null;
+	/** Every player on screen, so sections loaded from a note can reach one that is already open. */
+	static instances = new Set<AudioControls>();
 
 	private audio: HTMLAudioElement;
 	private state: FileLoopState;
@@ -135,6 +202,27 @@ class AudioControls {
 		this.renderSections();
 		this.syncLoopUi();
 		AudioControls.active = this;
+		AudioControls.instances.add(this);
+	}
+
+	/** Re-reads this file's sections from settings after something else replaced them. */
+	static reloadAll(storageKey: string) {
+		for (const player of AudioControls.instances) {
+			if (!player.isConnected()) {
+				AudioControls.instances.delete(player);
+			} else if (player.storageKey === storageKey) {
+				player.reloadState();
+			}
+		}
+	}
+
+	private reloadState() {
+		this.cancelGap(true);
+		this.loopEnabled = false;
+		this.activeLoop = -1;
+		this.state = AudioControls.loadState(this.plugin.settings.fileLoops[this.storageKey]);
+		this.renderSections();
+		this.syncLoopUi();
 	}
 
 	isConnected(): boolean {
@@ -158,6 +246,7 @@ class AudioControls {
 	}
 
 	destroy() {
+		AudioControls.instances.delete(this);
 		this.stopTicking();
 		this.clearGapState();
 		this.audio.pause();
@@ -529,13 +618,16 @@ class AudioControls {
 
 	private persist() {
 		const store = this.plugin.settings.fileLoops;
-		if (this.state.sections.length === 0) {
+		const noteSections = store[this.storageKey]?.noteSections;
+		// Keep an emptied list if it came from a note, so the note doesn't reload it.
+		if (this.state.sections.length === 0 && !noteSections) {
 			delete store[this.storageKey];
 		} else {
 			store[this.storageKey] = {
 				sections: this.state.sections.map((s) => ({ ...s })),
 				selected: [...this.state.selected],
 				primary: this.state.primary,
+				...(noteSections ? { noteSections } : {}),
 			};
 		}
 		void this.plugin.saveSettings();
@@ -855,6 +947,7 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 		await this.loadSettings();
 		this.addSettingTab(new AudioLoopPlayerSettingTab(this.app, this));
 		this.registerCommands();
+		this.registerMarkdownCodeBlockProcessor("loops", (source, el, ctx) => this.renderLoopsBlock(source, el, ctx));
 
 		// Enhance every mp3/m4a/wav <audio> element as it appears anywhere in the app —
 		// embedded in Reading View, embedded in Live Preview, or the native audio view
@@ -926,6 +1019,130 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 			audio.insertAdjacentElement("afterend", wrapper);
 			new AudioControls(wrapper, audio, this, this.storageKeyFor(src));
 		});
+	}
+
+	// ---------------------------------------------------------------- `loops` code blocks
+
+	/**
+	 * A `loops` block lists sections for an audio file (written by e.g. trad-split).
+	 * It is shown as a one-line status instead of raw text; the sections themselves
+	 * appear in the player. See `noteSectionsStatus` for when they are applied.
+	 */
+	private renderLoopsBlock(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+		const box = el.createDiv({ cls: "alp-loops-block" });
+		const block = parseLoopsBlock(source);
+		const file = this.resolveLoopsFile(block.file, el, ctx);
+
+		const problems = [...block.errors];
+		if (!file) {
+			problems.unshift(
+				block.file ? `Can't find audio file "${block.file}"` : "No file: line and no audio embed above this block"
+			);
+		}
+		if (problems.length > 0 || !file) {
+			box.addClass("is-error");
+			box.createDiv({ text: "Loop sections not loaded:" });
+			const list = box.createEl("ul");
+			problems.forEach((p) => list.createEl("li", { text: p }));
+			return;
+		}
+
+		const count = `${block.sections.length} section${block.sections.length === 1 ? "" : "s"}`;
+		const status = this.noteSectionsStatus(file.path, block.sections);
+		if (status === "applied") {
+			box.createSpan({ text: `${count} from this note for ${file.name}` });
+			return;
+		}
+		box.addClass("is-conflict");
+		box.createSpan({
+			text:
+				status === "edited"
+					? `${file.name}: the player's sections were edited after loading the ${count} in this note.`
+					: `${file.name}: this note lists ${count} that differ from the player's saved ones.`,
+		});
+		const button = box.createEl("button", { cls: "alp-btn", text: "Use the note's sections" });
+		button.addEventListener("click", () => {
+			this.applyNoteSections(file.path, block.sections);
+			box.empty();
+			box.removeClass("is-conflict");
+			box.createSpan({ text: `${count} from this note for ${file.name}` });
+		});
+	}
+
+	/** The `file:` path, or failing that the closest audio embed above the block. */
+	private resolveLoopsFile(path: string | null, el: HTMLElement, ctx: MarkdownPostProcessorContext): TFile | null {
+		const isAudio = (f: unknown): f is TFile =>
+			f instanceof TFile && AUDIO_EXTENSIONS.includes(f.extension.toLowerCase());
+
+		if (path) {
+			const exact = this.app.vault.getAbstractFileByPath(normalizePath(path));
+			if (isAudio(exact)) return exact;
+			const linked = this.app.metadataCache.getFirstLinkpathDest(path, ctx.sourcePath);
+			return isAudio(linked) ? linked : null;
+		}
+
+		const embeds = (this.app.metadataCache.getCache(ctx.sourcePath)?.embeds ?? [])
+			.map((e) => ({
+				line: e.position.start.line,
+				file: this.app.metadataCache.getFirstLinkpathDest(e.link.split("#")[0], ctx.sourcePath),
+			}))
+			.filter((e): e is { line: number; file: TFile } => isAudio(e.file));
+		const blockLine = ctx.getSectionInfo(el)?.lineStart;
+		if (blockLine === undefined) return embeds.length === 1 ? embeds[0].file : null;
+		const above = embeds.filter((e) => e.line < blockLine);
+		return above.length > 0 ? above[above.length - 1].file : null;
+	}
+
+	/**
+	 * Applies a note's sections unless that would throw away the user's own edits:
+	 * - nothing saved yet for the file → load them;
+	 * - the player still has exactly what was last loaded from a note → the note
+	 *   was updated, so load the new version;
+	 * - otherwise leave the player alone and report "edited" (the note is unchanged
+	 *   since it was loaded) or "conflict" (both differ), so the user can choose.
+	 */
+	private noteSectionsStatus(path: string, sections: LoopSection[]): "applied" | "edited" | "conflict" {
+		const saved = this.settings.fileLoops[path];
+		const note = sectionsKey(sections);
+		if (!saved || (saved.sections.length === 0 && !saved.noteSections)) {
+			this.applyNoteSections(path, sections);
+			return "applied";
+		}
+		if (sectionsKey(saved.sections) === note) {
+			if (!saved.noteSections || sectionsKey(saved.noteSections) !== note) {
+				saved.noteSections = copySections(sections);
+				void this.saveSettings();
+			}
+			return "applied";
+		}
+		if (saved.noteSections && sectionsKey(saved.sections) === sectionsKey(saved.noteSections)) {
+			this.applyNoteSections(path, sections);
+			return "applied";
+		}
+		return saved.noteSections && sectionsKey(saved.noteSections) === note ? "edited" : "conflict";
+	}
+
+	private applyNoteSections(path: string, sections: LoopSection[]) {
+		const previous = this.settings.fileLoops[path];
+		let selected = (previous?.selected ?? []).filter((i) => i < sections.length);
+		let primary = previous?.primary ?? -1;
+		if (sections.length === 0) {
+			selected = [];
+			primary = -1;
+		} else if (selected.length === 0) {
+			selected = [0];
+			primary = 0;
+		} else if (!selected.includes(primary)) {
+			primary = selected[0];
+		}
+		this.settings.fileLoops[path] = {
+			sections: copySections(sections),
+			selected,
+			primary,
+			noteSections: copySections(sections),
+		};
+		void this.saveSettings();
+		AudioControls.reloadAll(path);
 	}
 
 	/**

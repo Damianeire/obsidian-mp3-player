@@ -478,3 +478,28 @@
 .alp-tick-label:hover {
 	color: var(--text-normal);
 }
+
+/* `loops` code block: a one-line status in place of the raw section list */
+.alp-loops-block {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 10px;
+	margin: 0.25em 0 0.75em;
+	max-width: 480px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.alp-loops-block.is-conflict {
+	color: var(--text-normal);
+}
+
+.alp-loops-block.is-error {
+	display: block;
+	color: var(--text-error);
+}
+
+.alp-loops-block ul {
+	margin: 0.25em 0 0;
+}
