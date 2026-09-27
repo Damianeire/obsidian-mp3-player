@@ -20,7 +20,8 @@ files opened in their own tab.
   before each repeat. The play button pulses during the gap; pressing it
   cancels the loop and leaves playback paused.
 - **Sections** — press **+** to add another section, then Set A / Set B to
-  mark it. Click a section's number to select it and jump to its start.
+  mark it. The first section starts at 0:00, and each new section starts where
+  the previous one ends, so you often only need Set B. Both can be overwritten. Click a section's number to select it and jump to its start.
   Sections can be named and deleted, and are saved per audio file so they are
   still there the next time you open it.
 - **Looping several sections** — shift+click (or cmd/ctrl+click) section

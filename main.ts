@@ -495,7 +495,7 @@ class AudioControls {
 	/** Returns the primary section, creating a first one if the file has none yet. */
 	private ensureSelected(): LoopSection {
 		const { sections } = this.state;
-		if (sections.length === 0) sections.push({ name: "", start: null, end: null });
+		if (sections.length === 0) sections.push(this.newSection());
 		if (this.state.primary < 0 || this.state.primary >= sections.length) {
 			this.state.primary = sections.length - 1;
 			this.state.selected = [this.state.primary];
@@ -555,8 +555,19 @@ class AudioControls {
 		this.commitState();
 	}
 
+	/**
+	 * A fresh section, pre-filled so consecutive sections join up: the first one
+	 * starts at 0:00 and each later one starts where the last one in the list ends
+	 * (left blank if that end is not set yet). Either value can be overwritten.
+	 */
+	private newSection(): LoopSection {
+		const { sections } = this.state;
+		const start = sections.length === 0 ? 0 : sections[sections.length - 1].end;
+		return { name: "", start, end: null };
+	}
+
 	addSection() {
-		this.state.sections.push({ name: "", start: null, end: null });
+		this.state.sections.push(this.newSection());
 		this.state.primary = this.state.sections.length - 1;
 		this.state.selected = [this.state.primary];
 		this.commitState();
