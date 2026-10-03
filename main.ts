@@ -108,6 +108,30 @@ function parseTimeInput(value: string): number | null {
 	return parseFloat(trimmed);
 }
 
+/** A start time, or a start and end, given in an embed's alias: `![[tune.mp3|1:23-1:45]]`. */
+interface EmbedSpec {
+	start: number;
+	end: number | null;
+}
+
+const EMBED_TIME = String.raw`\d+(?::\d+){0,2}(?:\.\d+)?`;
+const EMBED_SPEC_RE = new RegExp(`^(?:t=)?(${EMBED_TIME})(?:\\s*(?:-|\u2013|to)\\s*(${EMBED_TIME}))?$`, "i");
+
+/**
+ * Reads an embed alias as a time: `1:23`, `83`, `t=1:23`, `1:23-1:45`, `1:23 to 1:45`.
+ * Anything else (an ordinary alias such as a file name) gives null, so it is ignored.
+ */
+function parseEmbedSpec(raw: string | null | undefined): EmbedSpec | null {
+	if (!raw) return null;
+	const match = EMBED_SPEC_RE.exec(raw.trim());
+	if (!match) return null;
+	const start = parseTimeInput(match[1]);
+	if (start === null) return null;
+	const end = match[2] ? parseTimeInput(match[2]) : null;
+	if (match[2] && (end === null || end <= start)) return null;
+	return { start, end };
+}
+
 /** Identity of a section list, for telling whether two lists are the same. */
 function sectionsKey(sections: LoopSection[]): string {
 	return JSON.stringify(sections.map((s) => [s.name, s.start, s.end]));
@@ -865,6 +889,39 @@ class AudioControls {
 	}
 
 	/**
+	 * Applies a time given in the embed itself (`![[tune.mp3|1:23]]`): moves the playhead
+	 * there, and for a range selects that section (creating it the first time) with Loop
+	 * on. Never plays, and does nothing while audio is playing.
+	 */
+	applyEmbedSpec(spec: EmbedSpec) {
+		if (this.audio.readyState < HTMLMediaElement.HAVE_METADATA) {
+			this.audio.addEventListener("loadedmetadata", () => this.applyEmbedSpec(spec), { once: true });
+			return;
+		}
+		if (!this.audio.paused || this.inGap) return;
+		const start = this.clampToDuration(spec.start);
+		if (spec.end === null) {
+			this.seekTo(start);
+			return;
+		}
+		const end = this.clampToDuration(spec.end);
+		if (end <= start) {
+			this.seekTo(start);
+			return;
+		}
+		// Reuse a matching section, so opening the note again does not add another.
+		let index = this.state.sections.findIndex(
+			(s) => isComplete(s) && Math.abs(s.start - start) < 0.25 && Math.abs(s.end - end) < 0.25
+		);
+		if (index < 0) {
+			this.state.sections.push({ name: "", start, end });
+			index = this.state.sections.length - 1;
+		}
+		this.selectSection(index, true);
+		if (!this.loopEnabled) this.toggleLoop();
+	}
+
+	/**
 	 * Readies the player on the section a note is about (its `select:` line) without
 	 * playing: selects it, moves the playhead to its start and sets what happens at
 	 * its end. Does nothing while audio is playing, so it never interrupts a tune.
@@ -1139,6 +1196,8 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 			audio.insertAdjacentElement("afterend", wrapper);
 			const player = new AudioControls(wrapper, audio, this, this.storageKeyFor(src));
 			this.flushPendingSelect(player.storageKey);
+			const spec = this.embedSpecFor(audio, player.storageKey);
+			if (spec) player.applyEmbedSpec(spec);
 		});
 	}
 
@@ -1329,6 +1388,45 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 	 * Maps an <audio> src (an app:// resource URL) back to the vault path of the file,
 	 * so saved sections follow the file wherever it is embedded or opened.
 	 */
+	/**
+	 * The time in this audio element's embed alias, if any. Read from the embed's `alt`
+	 * attribute, or failing that from the note's own link metadata, matched by order
+	 * among the embeds of the same file.
+	 */
+	private embedSpecFor(audio: HTMLAudioElement, audioPath: string): EmbedSpec | null {
+		const embed = audio.closest(".internal-embed");
+		if (!embed) return null;
+		const fromAlt = parseEmbedSpec(embed.getAttribute("alt"));
+		if (fromAlt) return fromAlt;
+
+		const src = embed.getAttribute("src");
+		if (!src) return null;
+		const note = this.noteContaining(embed);
+		if (!note) return null;
+		const cache = this.app.metadataCache.getFileCache(note);
+		const mine = (cache?.embeds ?? []).filter((e) => {
+			const target = this.app.metadataCache.getFirstLinkpathDest(e.link.split("#")[0], note.path);
+			return target?.path === audioPath;
+		});
+		if (mine.length === 0) return null;
+		const container = embed.closest(".workspace-leaf-content") ?? document.body;
+		const sameSrc = Array.from(container.querySelectorAll(".internal-embed")).filter(
+			(el) => el.getAttribute("src") === src
+		);
+		const nth = Math.max(0, sameSrc.indexOf(embed));
+		const hit = mine[Math.min(nth, mine.length - 1)];
+		return parseEmbedSpec(hit.displayText) ?? parseEmbedSpec(hit.original.match(/\|([^\]]*)\]\]$/)?.[1]);
+	}
+
+	/** The note whose view contains this element, falling back to the active note. */
+	private noteContaining(el: Element): TFile | null {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const view = leaf.view;
+			if (view instanceof MarkdownView && view.containerEl.contains(el) && view.file) return view.file;
+		}
+		return this.app.workspace.getActiveFile();
+	}
+
 	private storageKeyFor(src: string): string {
 		const clean = src.split("?")[0];
 		for (const file of this.app.vault.getFiles()) {

@@ -95,6 +95,25 @@ shows whatever was last selected. `once` and `loop` need the section to have
 an end time. An unreadable `select:` line counts as a problem like any other,
 so nothing in the block is loaded until it is fixed.
 
+## Starting point in the embed
+
+An embed can say where to start, in place of an alias:
+
+```markdown
+![[Sessions/Set 1.m4a|1:23]]          start at 1:23
+![[Sessions/Set 1.m4a|83]]            plain number is seconds
+![[Sessions/Set 1.m4a|t=1:23]]        t= is accepted too
+![[Sessions/Set 1.m4a|1:23-1:45]]     section 1:23 to 1:45, selected, Loop on
+![[Sessions/Set 1.m4a|1:23 to 1:45]]  same (an en dash works as well)
+```
+
+Nothing plays until you press play, and nothing happens if the audio is already
+playing. A range is added to the file's sections the first time (or matched to an
+existing section within a quarter of a second), so opening the note again does not
+add another. Any alias that isn't a time, such as a name, is ignored, so existing
+embeds are unaffected. Use either this or a `loops` block's `select:` for one embed,
+not both.
+
 ## Commands (bind to hotkeys in Settings → Hotkeys)
 
 All commands act on the player you most recently used:
