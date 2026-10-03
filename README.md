@@ -65,6 +65,36 @@ been edited since the last load. Once you edit sections in the player, the
 note never overwrites them silently: the block says they differ and offers a
 **Use the note's sections** button. The plugin never writes to the note.
 
+### Starting on one section (`select:`)
+
+When a note is about one tune in a longer file, add a `select:` line so the
+player is ready on that tune when you open the note. Nothing plays until you
+press play.
+
+````markdown
+```loops
+file: Sessions/Set 1.m4a
+select: 2
+0:00 - 2:18 | Tune 1
+2:18 - 4:34.3 | Tune 2
+4:34.3 - 6:50 | Tune 3
+```
+````
+
+- `select: 2` selects section 2, moves the playhead to its start, plays it
+  **once** and stops at its end, back at its start, so play repeats it.
+- `select: 2 loop` turns Loop on, so section 2 repeats.
+- `select: 2 continue` starts at section 2 and plays on through the rest of
+  the file.
+
+The selection is applied each time you arrive at the note, not while you edit
+it, and never while the audio is playing. Clicking another section, turning
+Loop on or dragging the playhead out of the section ends the play-once
+behaviour. Selection is saved per audio file, so a note without `select:`
+shows whatever was last selected. `once` and `loop` need the section to have
+an end time. An unreadable `select:` line counts as a problem like any other,
+so nothing in the block is loaded until it is fixed.
+
 ## Commands (bind to hotkeys in Settings → Hotkeys)
 
 All commands act on the player you most recently used:

@@ -1,6 +1,7 @@
 import {
 	App,
 	MarkdownPostProcessorContext,
+	MarkdownView,
 	normalizePath,
 	Plugin,
 	PluginSettingTab,
@@ -14,6 +15,10 @@ const AUDIO_EXTENSIONS = ["mp3", "m4a", "wav"];
 // Non-linear speed scale: fine-grained steps around normal speed, coarser further out.
 const SPEED_STEPS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
 const DEFAULT_SPEED_INDEX = SPEED_STEPS.indexOf(1);
+
+/** How long a note's `select:` waits for its player to appear before giving up. */
+const SELECT_WAIT_MS = 5000;
+const SELECT_RETRY_MS = 200;
 
 const MIN_PAUSE_SECONDS = 0.1;
 const MAX_PAUSE_SECONDS = 5;
@@ -112,9 +117,25 @@ function copySections(sections: LoopSection[]): LoopSection[] {
 	return sections.map((s) => ({ name: s.name, start: s.start, end: s.end }));
 }
 
+/**
+ * What happens when a note-selected section reaches its end:
+ * - once: pause and go back to its start;
+ * - loop: repeat it (Loop on);
+ * - continue: play on into the rest of the file.
+ */
+type SelectMode = "once" | "loop" | "continue";
+
+interface NoteSelection {
+	/** Zero-based section index. */
+	index: number;
+	mode: SelectMode;
+}
+
 interface LoopsBlock {
 	/** Vault-relative path from the `file:` line, if there was one. */
 	file: string | null;
+	/** From a `select:` line: the section the note is about. */
+	select: NoteSelection | null;
 	sections: LoopSection[];
 	errors: string[];
 }
@@ -123,19 +144,35 @@ interface LoopsBlock {
  * Parses a `loops` code block:
  *
  *     file: Sessions/Set 1.m4a
+ *     select: 2 loop
  *     0:00 - 2:18 | Tune 1
  *     2:18 - 4:34.3 | Tune 2 ?
  *
- * The name (after `|`) and the end time are optional.
+ * The name (after `|`) and the end time are optional. `select:` takes a section
+ * number and optionally `once` (the default), `loop` or `continue`.
  */
 function parseLoopsBlock(source: string): LoopsBlock {
-	const block: LoopsBlock = { file: null, sections: [], errors: [] };
+	const block: LoopsBlock = { file: null, select: null, sections: [], errors: [] };
+	let selectLine = 0;
 	source.split("\n").forEach((raw, i) => {
 		const line = raw.trim();
 		if (!line) return;
 		const fileMatch = line.match(/^file\s*:\s*(.+)$/i);
 		if (fileMatch) {
 			block.file = fileMatch[1].trim();
+			return;
+		}
+		if (/^select\s*:/i.test(line)) {
+			const selectMatch = line.match(/^select\s*:\s*(\d+)(?:\s+(once|loop|continue))?$/i);
+			if (!selectMatch || parseInt(selectMatch[1], 10) < 1) {
+				block.errors.push(`Line ${i + 1}: can't read "${line}" (use e.g. "select: 2", "select: 2 loop" or "select: 2 continue")`);
+				return;
+			}
+			block.select = {
+				index: parseInt(selectMatch[1], 10) - 1,
+				mode: (selectMatch[2]?.toLowerCase() ?? "once") as SelectMode,
+			};
+			selectLine = i + 1;
 			return;
 		}
 		const match = line.match(/^([\d:.]+)\s*[-–—]\s*([\d:.]*)\s*(?:\|(.*))?$/);
@@ -151,6 +188,16 @@ function parseLoopsBlock(source: string): LoopsBlock {
 		}
 		block.sections.push({ name: (match[3] ?? "").trim(), start, end });
 	});
+	if (block.select) {
+		const section = block.sections[block.select.index];
+		if (!section) {
+			block.errors.push(`Line ${selectLine}: there is no section ${block.select.index + 1}`);
+			block.select = null;
+		} else if (block.select.mode !== "continue" && section.end === null) {
+			block.errors.push(`Line ${selectLine}: section ${block.select.index + 1} needs an end time to play once or loop`);
+			block.select = null;
+		}
+	}
 	return block;
 }
 
@@ -181,6 +228,8 @@ class AudioControls {
 	private seekMarks: HTMLElement;
 	/** Index of the section the multi-section loop is currently playing through. */
 	private activeLoop = -1;
+	/** Section to play once and then stop at (a note's `select:`), or -1. */
+	private onceSection = -1;
 	private playBtn: HTMLButtonElement;
 	private loopToggleBtn: HTMLButtonElement;
 	private sectionList: HTMLElement;
@@ -190,7 +239,7 @@ class AudioControls {
 		container: HTMLElement,
 		audio: HTMLAudioElement,
 		private plugin: AudioLoopPlayerPlugin,
-		private storageKey: string
+		readonly storageKey: string
 	) {
 		this.root = container;
 		this.audio = audio;
@@ -220,6 +269,7 @@ class AudioControls {
 		this.cancelGap(true);
 		this.loopEnabled = false;
 		this.activeLoop = -1;
+		this.onceSection = -1;
 		this.state = AudioControls.loadState(this.plugin.settings.fileLoops[this.storageKey]);
 		this.renderSections();
 		this.syncLoopUi();
@@ -227,6 +277,16 @@ class AudioControls {
 
 	isConnected(): boolean {
 		return this.root.isConnected;
+	}
+
+	/** True when the player is drawn somewhere inside `el`. */
+	isInside(el: Element): boolean {
+		return el.contains(this.root);
+	}
+
+	/** Every player on screen for one audio file. */
+	static playersFor(storageKey: string): AudioControls[] {
+		return Array.from(AudioControls.instances).filter((p) => p.isConnected() && p.storageKey === storageKey);
 	}
 
 	/** Copies saved state, migrating the 0.2.0 shape where `selected` was a single index. */
@@ -415,6 +475,8 @@ class AudioControls {
 			this.seekDragging = true;
 			const t = parseFloat(this.seek.value);
 			this.cancelGap(true);
+			const once = this.state.sections[this.onceSection];
+			if (once && !this.contains(once, t)) this.onceSection = -1;
 			this.audio.currentTime = t;
 			this.lastTime = t;
 			this.updateTimeLabel();
@@ -669,6 +731,7 @@ class AudioControls {
 		const { sections } = this.state;
 		if (index < 0 || index >= sections.length) return;
 		sections.splice(index, 1);
+		this.onceSection = -1;
 		const shift = (i: number) => (i > index ? i - 1 : i);
 		this.state.selected = this.state.selected.filter((i) => i !== index).map(shift);
 		if (sections.length === 0) {
@@ -697,6 +760,7 @@ class AudioControls {
 		this.state.selected = this.state.selected.map(remap).filter((i) => i >= 0).sort((a, b) => a - b);
 		this.state.primary = remap(this.state.primary);
 		this.activeLoop = remap(this.activeLoop);
+		this.onceSection = remap(this.onceSection);
 		this.commitState();
 	}
 
@@ -724,6 +788,7 @@ class AudioControls {
 		this.state.selected = [index];
 		this.state.primary = index;
 		this.activeLoop = index;
+		if (index !== this.onceSection) this.onceSection = -1;
 		const section = this.state.sections[index];
 		if (seekToStart && section.start !== null) this.seekTo(section.start);
 		this.commitState();
@@ -768,6 +833,7 @@ class AudioControls {
 		if (loops.length === 0) return;
 		this.loopEnabled = !this.loopEnabled;
 		if (this.loopEnabled) {
+			this.onceSection = -1;
 			// Start from wherever the playhead already is inside the loop set, otherwise
 			// from the first section (or the primary one if it is part of the set).
 			const t = this.audio.currentTime;
@@ -796,6 +862,24 @@ class AudioControls {
 	jumpToEnd() {
 		const section = this.selectedSection();
 		if (section && section.end !== null) this.seekTo(section.end);
+	}
+
+	/**
+	 * Readies the player on the section a note is about (its `select:` line) without
+	 * playing: selects it, moves the playhead to its start and sets what happens at
+	 * its end. Does nothing while audio is playing, so it never interrupts a tune.
+	 */
+	applyNoteSelection(selection: NoteSelection) {
+		if (this.audio.readyState < HTMLMediaElement.HAVE_METADATA) {
+			this.audio.addEventListener("loadedmetadata", () => this.applyNoteSelection(selection), { once: true });
+			return;
+		}
+		if (!this.audio.paused || this.inGap) return;
+		const { index, mode } = selection;
+		if (index < 0 || index >= this.state.sections.length) return;
+		this.selectSection(index, true);
+		if (mode === "loop" ? !this.loopEnabled : this.loopEnabled) this.toggleLoop();
+		this.onceSection = mode === "once" ? index : -1;
 	}
 
 	private seekTo(time: number) {
@@ -881,6 +965,10 @@ class AudioControls {
 		const previous = this.lastTime;
 		this.lastTime = current;
 
+		if (!this.loopEnabled && this.onceSection >= 0 && this.root.isConnected) {
+			this.checkOnce(previous, current);
+			return;
+		}
 		if (!this.loopEnabled || this.inGap || !this.root.isConnected) return;
 		if (this.audio.paused && !this.audio.ended) return;
 		const loops = this.loopSections();
@@ -898,6 +986,17 @@ class AudioControls {
 			const next = loops[(loops.indexOf(this.activeLoop) + 1) % loops.length];
 			this.activeLoop = next;
 			this.restartLoop((this.state.sections[next] as CompleteSection).start);
+		}
+	}
+
+	/** Play-once mode: stop at the section's end and go back to its start, ready to play again. */
+	private checkOnce(previous: number, current: number) {
+		const section = this.state.sections[this.onceSection];
+		if (!section || !isComplete(section)) return;
+		const crossedEnd = previous < section.end && current >= section.end;
+		if (crossedEnd || (this.audio.ended && current >= section.end)) {
+			this.audio.pause();
+			this.seekTo(section.start);
 		}
 	}
 
@@ -940,14 +1039,35 @@ class AudioControls {
 	}
 }
 
+interface PendingSelect {
+	selection: NoteSelection;
+	/** The rendered `loops` block, used to find the player in the same pane. */
+	el: HTMLElement;
+	expires: number;
+}
+
 export default class AudioLoopPlayerPlugin extends Plugin {
 	settings: AudioLoopPlayerSettings;
+	/**
+	 * "note path\naudio path" for each `select:` already applied while its note has
+	 * stayed open. Live Preview re-renders a block as you type in it, and the
+	 * selection should only be applied on arriving at the note, not on every edit.
+	 */
+	private selectedNotes = new Set<string>();
+	/** `select:` lines waiting for their player, keyed by audio file path. */
+	private pendingSelect = new Map<string, PendingSelect>();
 
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new AudioLoopPlayerSettingTab(this.app, this));
 		this.registerCommands();
 		this.registerMarkdownCodeBlockProcessor("loops", (source, el, ctx) => this.renderLoopsBlock(source, el, ctx));
+
+		// Forget a note's applied selection once it is no longer open, so coming back
+		// to it applies the selection again. Deferred a tick so the pane has switched.
+		const forgetClosedNotes = () => window.setTimeout(() => this.forgetClosedNotes(), 0);
+		this.registerEvent(this.app.workspace.on("file-open", forgetClosedNotes));
+		this.registerEvent(this.app.workspace.on("layout-change", forgetClosedNotes));
 
 		// Enhance every mp3/m4a/wav <audio> element as it appears anywhere in the app —
 		// embedded in Reading View, embedded in Live Preview, or the native audio view
@@ -1017,7 +1137,8 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 
 			const wrapper = createDiv({ cls: "alp-embed" });
 			audio.insertAdjacentElement("afterend", wrapper);
-			new AudioControls(wrapper, audio, this, this.storageKeyFor(src));
+			const player = new AudioControls(wrapper, audio, this, this.storageKeyFor(src));
+			this.flushPendingSelect(player.storageKey);
 		});
 	}
 
@@ -1048,9 +1169,11 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 		}
 
 		const count = `${block.sections.length} section${block.sections.length === 1 ? "" : "s"}`;
+		const selected = block.select ? `, section ${block.select.index + 1} selected` : "";
 		const status = this.noteSectionsStatus(file.path, block.sections);
 		if (status === "applied") {
-			box.createSpan({ text: `${count} from this note for ${file.name}` });
+			box.createSpan({ text: `${count} from this note for ${file.name}${selected}` });
+			if (block.select) this.queueNoteSelection(ctx.sourcePath, file.path, block.select, el, false);
 			return;
 		}
 		box.addClass("is-conflict");
@@ -1061,12 +1184,69 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 					: `${file.name}: this note lists ${count} that differ from the player's saved ones.`,
 		});
 		const button = box.createEl("button", { cls: "alp-btn", text: "Use the note's sections" });
+		if (block.select) {
+			box.createSpan({ text: ` Section ${block.select.index + 1} is selected once the note's sections are used.` });
+		}
 		button.addEventListener("click", () => {
 			this.applyNoteSections(file.path, block.sections);
 			box.empty();
 			box.removeClass("is-conflict");
-			box.createSpan({ text: `${count} from this note for ${file.name}` });
+			box.createSpan({ text: `${count} from this note for ${file.name}${selected}` });
+			if (block.select) this.queueNoteSelection(ctx.sourcePath, file.path, block.select, el, true);
 		});
+	}
+
+	/**
+	 * Readies the player for `audioPath` on the note's selected section. Applied once
+	 * per visit to the note unless `force` (the user asked for the note's sections).
+	 */
+	private queueNoteSelection(
+		notePath: string,
+		audioPath: string,
+		selection: NoteSelection,
+		el: HTMLElement,
+		force: boolean
+	) {
+		const key = `${notePath}\n${audioPath}`;
+		if (this.selectedNotes.has(key) && !force) return;
+		this.selectedNotes.add(key);
+		this.pendingSelect.set(audioPath, { selection, el, expires: Date.now() + SELECT_WAIT_MS });
+		// The block is not in the page yet while it is being rendered, and the embed's
+		// player may not exist yet either; try once both have had a chance to appear.
+		window.setTimeout(() => this.flushPendingSelect(audioPath), 0);
+	}
+
+	/**
+	 * Applies a waiting `select:` to the player in the same pane as its block. Called
+	 * after the block renders and whenever a player is created; retries until it
+	 * finds the player or gives up.
+	 */
+	private flushPendingSelect(audioPath: string) {
+		const pending = this.pendingSelect.get(audioPath);
+		if (!pending) return;
+		if (Date.now() > pending.expires) {
+			this.pendingSelect.delete(audioPath);
+			return;
+		}
+		const pane = pending.el.isConnected ? pending.el.closest(".workspace-leaf") : null;
+		const player = pane ? AudioControls.playersFor(audioPath).find((p) => p.isInside(pane)) : undefined;
+		if (!player) {
+			window.setTimeout(() => this.flushPendingSelect(audioPath), SELECT_RETRY_MS);
+			return;
+		}
+		this.pendingSelect.delete(audioPath);
+		player.applyNoteSelection(pending.selection);
+	}
+
+	private forgetClosedNotes() {
+		const open = new Set<string>();
+		this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
+			const path = leaf.view instanceof MarkdownView ? leaf.view.file?.path : undefined;
+			if (path) open.add(path);
+		});
+		for (const key of this.selectedNotes) {
+			if (!open.has(key.split("\n")[0])) this.selectedNotes.delete(key);
+		}
 	}
 
 	/** The `file:` path, or failing that the closest audio embed above the block. */
