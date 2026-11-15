@@ -871,7 +871,7 @@ class AudioControls {
 			try {
 				this.pitchNode = await this.plugin.pitch.attach(this.audio, () => this.useLocalCopy());
 			} catch (e) {
-				console.error("Audio Loop Player: pitch shifting unavailable", e);
+				console.error("Music Practice Player: pitch shifting unavailable", e);
 				new Notice("Pitch shifting isn't available for this audio.");
 				this.pitchCents = 0;
 				delete this.plugin.settings.filePitch[this.storageKey];

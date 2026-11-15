@@ -1,9 +1,10 @@
-# Audio Loop Player (Obsidian plugin)
+# Music Practice Player (Obsidian plugin)
 
-Play mp3/m4a/wav files inside Obsidian with practice-friendly controls: named
-A–B loop sections, an optional pause between repeats, and a draggable playback
-speed slider. Works on audio embedded in notes (`![[tune.mp3]]`) and on audio
-files opened in their own tab.
+Practise music from audio files inside Obsidian. Loop named A–B sections, slow
+a tune down or speed it up without changing its pitch, and shift the pitch
+independently to change key or match a slightly off-tuning recording. Works on
+audio embedded in notes (`![[tune.mp3]]`) and on audio files opened in their
+own tab. Supports mp3, m4a and wav.
 
 ## Controls
 
@@ -145,4 +146,4 @@ npm run build    # type-check and produce main.js
 ```
 
 Copy `main.js`, `manifest.json` and `styles.css` into
-`<vault>/.obsidian/plugins/audio-loop-player/` and reload Obsidian.
+`<vault>/.obsidian/plugins/music-practice-player/` and reload Obsidian.

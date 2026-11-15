@@ -1,7 +1,7 @@
 {
-	"name": "audio-loop-player",
+	"name": "music-practice-player",
 	"version": "0.4.0",
-	"description": "Play mp3/m4a/wav files with A-B section looping and a draggable playback speed slider.",
+	"description": "Audio player for practising music: loop sections, slow down without changing pitch, and shift pitch.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

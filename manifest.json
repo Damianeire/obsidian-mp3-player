@@ -1,9 +1,9 @@
 {
-	"id": "audio-loop-player",
-	"name": "Audio Loop Player",
+	"id": "music-practice-player",
+	"name": "Music Practice Player",
 	"version": "0.4.0",
 	"minAppVersion": "1.0.0",
-	"description": "Play mp3/m4a/wav files with A-B section looping and a draggable playback speed slider.",
+	"description": "Audio player for practising music: loop sections, slow down without changing pitch, and shift pitch.",
 	"author": "Damian Evans",
 	"authorUrl": "https://github.com/Damianeire",
 	"isDesktopOnly": false
