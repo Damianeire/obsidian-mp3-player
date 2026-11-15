@@ -5,6 +5,6 @@
 	"minAppVersion": "1.0.0",
 	"description": "Play mp3/m4a/wav files with A-B section looping and a draggable playback speed slider.",
 	"author": "Damian Evans",
-	"authorUrl": "",
+	"authorUrl": "https://github.com/Damianeire",
 	"isDesktopOnly": false
 }
