@@ -35,6 +35,11 @@ files opened in their own tab.
   list by start time, handy when sections were marked out of order.
 - **Speed** — drag to change playback rate from 0.5× to 1.5× (pitch preserved).
   Tick marks show every step; click a label (0.5×, 0.75×, 1×, 1.5×) to jump to it.
+- **Pitch** — shift the pitch without changing speed: ±1 tone buttons for a
+  key change, ±5¢ buttons for fine tuning to a recording that is slightly off
+  concert pitch, or type any number of cents (100¢ = a semitone, up to ±1200¢).
+  The pitch is remembered per audio file; the ↺ button resets it to 0. On
+  desktop the file is read into memory the first time its pitch is changed.
 
 ## Sections from a note (`loops` code block)
 
@@ -119,7 +124,8 @@ not both.
 All commands act on the player you most recently used:
 Play / pause · Set loop start (A) · Set loop end (B) · Toggle loop ·
 Jump to loop start · Jump to loop end · Add loop section · Sort loop sections by time ·
-Select next / previous section.
+Select next / previous section · Raise / lower pitch by a tone ·
+Raise / lower pitch by 5 cents · Reset pitch.
 
 ## Settings
 

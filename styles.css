@@ -503,3 +503,40 @@
 .alp-loops-block ul {
 	margin: 0.25em 0 0;
 }
+
+/* Pitch row */
+.alp-pitch-row {
+	flex-wrap: wrap;
+	gap: 6px;
+	font-size: 0.9em;
+}
+
+.alp-pitch-row .alp-speed-icon {
+	margin-right: 4px;
+}
+
+.alp-pitch-btn {
+	font-variant-numeric: tabular-nums;
+}
+
+.alp-pitch-input {
+	width: 4.2em;
+}
+
+.alp-pitch-status {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.alp-pitch-label {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.alp-pitch-label.is-shifted {
+	color: var(--text-accent);
+	font-weight: 600;
+}

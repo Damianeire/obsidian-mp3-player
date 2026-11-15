@@ -3,12 +3,21 @@ import {
 	MarkdownPostProcessorContext,
 	MarkdownView,
 	normalizePath,
+	Notice,
 	Plugin,
 	PluginSettingTab,
 	Setting,
 	setIcon,
 	TFile,
 } from "obsidian";
+import {
+	CENTS_PER_TONE,
+	formatPitch,
+	MAX_PITCH_CENTS,
+	MIN_PITCH_CENTS,
+	PITCH_FINE_STEP,
+	PitchEngine,
+} from "./pitch";
 
 const AUDIO_EXTENSIONS = ["mp3", "m4a", "wav"];
 
@@ -51,6 +60,8 @@ interface AudioLoopPlayerSettings {
 	pauseSeconds: number;
 	/** Saved sections keyed by vault path of the audio file. */
 	fileLoops: Record<string, FileLoopState>;
+	/** Pitch shift in cents keyed by vault path, for files not left at 0. */
+	filePitch: Record<string, number>;
 }
 
 const DEFAULT_SETTINGS: AudioLoopPlayerSettings = {
@@ -59,6 +70,7 @@ const DEFAULT_SETTINGS: AudioLoopPlayerSettings = {
 	pauseBetweenLoops: false,
 	pauseSeconds: 1,
 	fileLoops: {},
+	filePitch: {},
 };
 
 type CompleteSection = LoopSection & { start: number; end: number };
@@ -83,6 +95,20 @@ function clamp(value: number, min: number, max: number): number {
 function speedIndexFor(speed: number): number {
 	const idx = SPEED_STEPS.indexOf(speed);
 	return idx === -1 ? DEFAULT_SPEED_INDEX : idx;
+}
+
+const AUDIO_MIME: Record<string, string> = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav" };
+
+/** True when Web Audio may read this source as is (e.g. mobile, where vault files share the page's origin). */
+function isSameOriginSource(src: string): boolean {
+	try {
+		const url = new URL(src, window.location.href);
+		if (url.protocol === "blob:" || url.protocol === "data:") return true;
+		// Custom schemes such as desktop's app:// can report a "null" origin on both sides.
+		return (url.protocol === "http:" || url.protocol === "https:") && url.origin === window.location.origin;
+	} catch {
+		return false;
+	}
 }
 
 function isAudioSource(src: string): boolean {
@@ -254,10 +280,26 @@ class AudioControls {
 	private activeLoop = -1;
 	/** Section to play once and then stop at (a note's `select:`), or -1. */
 	private onceSection = -1;
+	/**
+	 * The 0:00-to-end section put in a file that has none, so Loop is one click away.
+	 * Not saved until the user changes it or adds to it, so a `loops` block written
+	 * later still loads cleanly.
+	 */
+	private autoSection: LoopSection | null = null;
+	/** The end it was given, to tell it apart from an edited one. */
+	private autoEnd = 0;
 	private playBtn: HTMLButtonElement;
 	private loopToggleBtn: HTMLButtonElement;
 	private sectionList: HTMLElement;
 	private speedLabel: HTMLElement;
+	/** Pitch shift in cents; 0 leaves the audio untouched. */
+	private pitchCents: number;
+	private pitchInput: HTMLInputElement;
+	private pitchLabel: HTMLElement;
+	private pitchResetBtn: HTMLButtonElement;
+	private pitchNode: AudioWorkletNode | null = null;
+	/** In-memory copy of the file the audio plays from once routed through the pitch shifter. */
+	private blobUrl: string | null = null;
 
 	constructor(
 		container: HTMLElement,
@@ -270,10 +312,14 @@ class AudioControls {
 		this.audio.playbackRate = plugin.settings.defaultSpeed;
 
 		this.state = AudioControls.loadState(plugin.settings.fileLoops[storageKey]);
+		this.pitchCents = plugin.settings.filePitch[storageKey] ?? 0;
 
 		this.build();
 		this.renderSections();
 		this.syncLoopUi();
+		this.syncPitchUi();
+		// Route it now rather than on play, so swapping in the local copy can't interrupt playback.
+		if (this.pitchCents !== 0) void this.applyPitch();
 		AudioControls.active = this;
 		AudioControls.instances.add(this);
 	}
@@ -295,8 +341,34 @@ class AudioControls {
 		this.activeLoop = -1;
 		this.onceSection = -1;
 		this.state = AudioControls.loadState(this.plugin.settings.fileLoops[this.storageKey]);
+		this.autoSection = null;
+		this.addWholeFileSection();
 		this.renderSections();
 		this.syncLoopUi();
+	}
+
+	/** Gives a file with no sections one spanning the whole file, once its duration is known. */
+	private addWholeFileSection() {
+		const duration = this.audio.duration;
+		if (this.state.sections.length > 0 || !isFinite(duration) || duration <= 0) return;
+		this.autoEnd = duration;
+		this.autoSection = { name: "", start: 0, end: duration };
+		this.state.sections.push(this.autoSection);
+		this.state.selected = [0];
+		this.state.primary = 0;
+	}
+
+	/** True while the only section is the automatic whole-file one, unchanged. */
+	private onlyAutoSection(): boolean {
+		const auto = this.autoSection;
+		return (
+			auto !== null &&
+			this.state.sections.length === 1 &&
+			this.state.sections[0] === auto &&
+			auto.name === "" &&
+			auto.start === 0 &&
+			auto.end === this.autoEnd
+		);
 	}
 
 	isConnected(): boolean {
@@ -334,6 +406,7 @@ class AudioControls {
 		this.stopTicking();
 		this.clearGapState();
 		this.audio.pause();
+		if (this.blobUrl) URL.revokeObjectURL(this.blobUrl);
 	}
 
 	// ---------------------------------------------------------------- UI construction
@@ -466,10 +539,37 @@ class AudioControls {
 			text: `${SPEED_STEPS[startIndex]}×`,
 		});
 
+		// --- Pitch row: shift by a tone, or by cents for fine tuning to a recording ---
+		const pitchRow = root.createDiv({ cls: "alp-row alp-pitch-row" });
+		pitchRow.createSpan({ cls: "alp-speed-icon", text: "Pitch" });
+		const pitchButton = (text: string, title: string, delta: number) => {
+			const btn = pitchRow.createEl("button", { cls: "alp-btn alp-pitch-btn", text, attr: { title } });
+			btn.addEventListener("click", () => this.shiftPitch(delta));
+		};
+		pitchButton("\u22121 tone", "Lower the pitch by a tone", -CENTS_PER_TONE);
+		pitchButton(`\u2212${PITCH_FINE_STEP}¢`, `Lower the pitch by ${PITCH_FINE_STEP} cents`, -PITCH_FINE_STEP);
+		this.pitchInput = pitchRow.createEl("input", {
+			cls: "alp-number-input alp-pitch-input",
+			attr: {
+				type: "number",
+				min: String(MIN_PITCH_CENTS),
+				max: String(MAX_PITCH_CENTS),
+				step: "1",
+				title: "Pitch shift in cents (100 = a semitone, 200 = a tone)",
+			},
+		}) as HTMLInputElement;
+		pitchRow.createSpan({ cls: "alp-unit", text: "¢" });
+		pitchButton(`+${PITCH_FINE_STEP}¢`, `Raise the pitch by ${PITCH_FINE_STEP} cents`, PITCH_FINE_STEP);
+		pitchButton("+1 tone", "Raise the pitch by a tone", CENTS_PER_TONE);
+		const pitchStatus = pitchRow.createSpan({ cls: "alp-pitch-status" });
+		this.pitchLabel = pitchStatus.createSpan({ cls: "alp-pitch-label" });
+		this.pitchResetBtn = this.iconButton(pitchStatus, "rotate-ccw", "Reset pitch");
+
 		// --- Wire events ---
 		this.playBtn.addEventListener("click", () => this.togglePlay());
 		this.audio.addEventListener("play", () => {
 			AudioControls.active = this;
+			this.plugin.pitch.resume();
 			this.clearGapState();
 			this.setPlayUi(true);
 			this.startTicking();
@@ -544,6 +644,16 @@ class AudioControls {
 			this.audio.playbackRate = speed;
 			this.speedLabel.setText(`${speed}×`);
 		});
+
+		const commitPitchInput = () => {
+			const parsed = parseFloat(this.pitchInput.value);
+			this.setPitch(isNaN(parsed) ? this.pitchCents : parsed);
+		};
+		this.pitchInput.addEventListener("change", commitPitchInput);
+		this.pitchInput.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") this.pitchInput.blur();
+		});
+		this.pitchResetBtn.addEventListener("click", () => this.setPitch(0));
 	}
 
 	private iconButton(parent: HTMLElement, icon: string, label: string): HTMLButtonElement {
@@ -702,9 +812,81 @@ class AudioControls {
 		this.persist();
 	}
 
+	// ---------------------------------------------------------------- pitch
+
+	shiftPitch(delta: number) {
+		this.setPitch(this.pitchCents + delta);
+	}
+
+	setPitch(cents: number) {
+		this.pitchCents = Math.round(clamp(cents, MIN_PITCH_CENTS, MAX_PITCH_CENTS));
+		const store = this.plugin.settings.filePitch;
+		if (this.pitchCents === 0) delete store[this.storageKey];
+		else store[this.storageKey] = this.pitchCents;
+		void this.plugin.saveSettings();
+		this.syncPitchUi();
+		void this.applyPitch();
+	}
+
+	private syncPitchUi() {
+		this.pitchInput.value = String(this.pitchCents);
+		this.pitchLabel.setText(formatPitch(this.pitchCents));
+		this.pitchLabel.toggleClass("is-shifted", this.pitchCents !== 0);
+		this.pitchResetBtn.disabled = this.pitchCents === 0;
+	}
+
+	/** Sends the current pitch to the shifter, routing the audio through it first if needed. */
+	private async applyPitch() {
+		if (!this.pitchNode) {
+			// Never shifted yet: nothing to do at 0, and the audio stays out of Web Audio.
+			if (this.pitchCents === 0) return;
+			try {
+				this.pitchNode = await this.plugin.pitch.attach(this.audio, () => this.useLocalCopy());
+			} catch (e) {
+				console.error("Audio Loop Player: pitch shifting unavailable", e);
+				new Notice("Pitch shifting isn't available for this audio.");
+				this.pitchCents = 0;
+				delete this.plugin.settings.filePitch[this.storageKey];
+				void this.plugin.saveSettings();
+				this.syncPitchUi();
+				return;
+			}
+		}
+		this.pitchNode.port.postMessage({ cents: this.pitchCents });
+	}
+
+	/**
+	 * Web Audio only hears audio from the page's own origin, and Obsidian serves vault
+	 * files from a different one on desktop, so play from an in-memory copy instead.
+	 */
+	private async useLocalCopy() {
+		const src = this.audio.currentSrc || this.audio.src;
+		if (isSameOriginSource(src)) return;
+		const file = this.plugin.app.vault.getAbstractFileByPath(this.storageKey);
+		if (!(file instanceof TFile)) throw new Error(`Not a vault file: ${this.storageKey}`);
+		const data = await this.plugin.app.vault.readBinary(file);
+		this.blobUrl = URL.createObjectURL(new Blob([data], { type: AUDIO_MIME[file.extension.toLowerCase()] ?? "" }));
+
+		const { currentTime, paused, playbackRate } = this.audio;
+		const loaded = new Promise((resolve) => this.audio.addEventListener("loadedmetadata", resolve, { once: true }));
+		this.audio.src = this.blobUrl;
+		await loaded;
+		// Loading a new source resets the rate.
+		this.audio.defaultPlaybackRate = playbackRate;
+		this.audio.playbackRate = playbackRate;
+		this.audio.currentTime = currentTime;
+		this.lastTime = currentTime;
+		if (!paused) await this.audio.play();
+	}
+
 	private persist() {
 		const store = this.plugin.settings.fileLoops;
 		const noteSections = store[this.storageKey]?.noteSections;
+		if (this.onlyAutoSection()) {
+			if (!noteSections) delete store[this.storageKey];
+			return;
+		}
+		this.autoSection = null;
 		// Keep an emptied list if it came from a note, so the note doesn't reload it.
 		if (this.state.sections.length === 0 && !noteSections) {
 			delete store[this.storageKey];
@@ -740,7 +922,7 @@ class AudioControls {
 	 */
 	private newSection(): LoopSection {
 		const { sections } = this.state;
-		const start = sections.length === 0 ? 0 : sections[sections.length - 1].end;
+		const start = sections.length === 0 || this.onlyAutoSection() ? 0 : sections[sections.length - 1].end;
 		return { name: "", start, end: null };
 	}
 
@@ -909,6 +1091,11 @@ class AudioControls {
 			this.seekTo(start);
 			return;
 		}
+		// The automatic whole-file section gives way to the embed's own range.
+		if (this.onlyAutoSection()) {
+			this.state.sections = [];
+			this.autoSection = null;
+		}
 		// Reuse a matching section, so opening the note again does not add another.
 		let index = this.state.sections.findIndex(
 			(s) => isComplete(s) && Math.abs(s.start - start) < 0.25 && Math.abs(s.end - end) < 0.25
@@ -1001,6 +1188,17 @@ class AudioControls {
 		const duration = this.audio.duration;
 		const max = isFinite(duration) && duration > 0 ? duration : 0;
 		if (this.seek.max !== String(max)) this.seek.max = String(max);
+		// Some files only settle on their exact length after loading; keep the automatic section in step.
+		if (max > 0 && this.onlyAutoSection() && this.autoEnd !== max) {
+			this.autoEnd = max;
+			this.autoSection!.end = max;
+			this.renderSections();
+		}
+		if (this.state.sections.length === 0 && max > 0) {
+			this.addWholeFileSection();
+			this.renderSections();
+			this.syncLoopUi();
+		}
 		this.updateTimeLabel();
 		this.renderSeekMarks();
 		if (!this.seekDragging) this.seek.value = String(this.audio.currentTime);
@@ -1105,6 +1303,7 @@ interface PendingSelect {
 
 export default class AudioLoopPlayerPlugin extends Plugin {
 	settings: AudioLoopPlayerSettings;
+	readonly pitch = new PitchEngine();
 	/**
 	 * "note path\naudio path" for each `select:` already applied while its note has
 	 * stayed open. Live Preview re-renders a block as you type in it, and the
@@ -1149,6 +1348,7 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 			observer.observe(document.body, { childList: true, subtree: true });
 			this.register(() => observer.disconnect());
 		});
+		this.register(() => this.pitch.close());
 	}
 
 	/** Commands act on the most recently used player, so they can be bound to hotkeys. */
@@ -1175,6 +1375,13 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 		withActivePlayer("sort-sections", "Sort loop sections by time", (p) => p.sortSectionsByTime());
 		withActivePlayer("next-section", "Select next section", (p) => p.selectRelative(1));
 		withActivePlayer("previous-section", "Select previous section", (p) => p.selectRelative(-1));
+		withActivePlayer("pitch-up-tone", "Raise pitch by a tone", (p) => p.shiftPitch(CENTS_PER_TONE));
+		withActivePlayer("pitch-down-tone", "Lower pitch by a tone", (p) => p.shiftPitch(-CENTS_PER_TONE));
+		withActivePlayer("pitch-up-fine", `Raise pitch by ${PITCH_FINE_STEP} cents`, (p) => p.shiftPitch(PITCH_FINE_STEP));
+		withActivePlayer("pitch-down-fine", `Lower pitch by ${PITCH_FINE_STEP} cents`, (p) =>
+			p.shiftPitch(-PITCH_FINE_STEP)
+		);
+		withActivePlayer("pitch-reset", "Reset pitch", (p) => p.setPitch(0));
 	}
 
 	private enhanceAudioIn(root: HTMLElement) {
@@ -1443,6 +1650,7 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		if (!this.settings.fileLoops) this.settings.fileLoops = {};
+		if (!this.settings.filePitch) this.settings.filePitch = {};
 	}
 
 	async saveSettings() {
