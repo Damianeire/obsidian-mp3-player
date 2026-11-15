@@ -1,8 +1,8 @@
 {
-	"id": "music-practice-player",
+	"id": "audio-loop-player",
 	"name": "Music Practice Player",
-	"version": "0.4.1",
-	"minAppVersion": "1.0.0",
+	"version": "0.4.2",
+	"minAppVersion": "1.2.3",
 	"description": "Audio player for practising music: loop sections, slow down without changing pitch, and shift pitch.",
 	"author": "Damian Evans",
 	"authorUrl": "https://github.com/Damianeire",

@@ -1,6 +1,6 @@
 {
-	"name": "music-practice-player",
-	"version": "0.4.1",
+	"name": "audio-loop-player",
+	"version": "0.4.2",
 	"description": "Audio player for practising music: loop sections, slow down without changing pitch, and shift pitch.",
 	"main": "main.js",
 	"scripts": {

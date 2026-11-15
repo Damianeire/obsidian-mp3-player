@@ -146,4 +146,4 @@ npm run build    # type-check and produce main.js
 ```
 
 Copy `main.js`, `manifest.json` and `styles.css` into
-`<vault>/.obsidian/plugins/music-practice-player/` and reload Obsidian.
+`<vault>/.obsidian/plugins/audio-loop-player/` and reload Obsidian.

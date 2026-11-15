@@ -1425,7 +1425,7 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 
 			audio.dataset.alpEnhanced = "true";
 			audio.controls = false;
-			audio.style.display = "none";
+			audio.addClass("alp-hidden");
 
 			const wrapper = createDiv({ cls: "alp-embed" });
 			audio.insertAdjacentElement("afterend", wrapper);
