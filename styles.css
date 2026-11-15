@@ -72,6 +72,26 @@
 	height: 16px;
 }
 
+/* Collapsed mini-player: only the transport row (play, seek bar, time, expand) */
+.alp-controls.is-collapsed {
+	padding: 6px 10px;
+}
+
+.alp-controls.is-collapsed > :not(.alp-transport) {
+	display: none;
+}
+
+.alp-collapse-btn {
+	flex-shrink: 0;
+	background: transparent;
+	border-color: transparent;
+	color: var(--text-muted);
+}
+
+.alp-collapse-btn:hover {
+	color: var(--text-normal);
+}
+
 /* During the silent gap between loop repeats the play button pulses */
 .alp-controls.is-gap .alp-play-btn {
 	animation: alp-gap-pulse 1s ease-in-out infinite;

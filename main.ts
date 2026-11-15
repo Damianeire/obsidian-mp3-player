@@ -62,6 +62,10 @@ interface AudioLoopPlayerSettings {
 	fileLoops: Record<string, FileLoopState>;
 	/** Pitch shift in cents keyed by vault path, for files not left at 0. */
 	filePitch: Record<string, number>;
+	/** Players start as a compact mini-player (play, seek bar, time) unless expanded. */
+	collapseByDefault: boolean;
+	/** Collapsed/expanded choice keyed by vault path, for files the user has toggled. */
+	fileCollapsed: Record<string, boolean>;
 }
 
 const DEFAULT_SETTINGS: AudioLoopPlayerSettings = {
@@ -71,6 +75,8 @@ const DEFAULT_SETTINGS: AudioLoopPlayerSettings = {
 	pauseSeconds: 1,
 	fileLoops: {},
 	filePitch: {},
+	collapseByDefault: false,
+	fileCollapsed: {},
 };
 
 type CompleteSection = LoopSection & { start: number; end: number };
@@ -289,6 +295,7 @@ class AudioControls {
 	/** The end it was given, to tell it apart from an edited one. */
 	private autoEnd = 0;
 	private playBtn: HTMLButtonElement;
+	private collapseBtn: HTMLButtonElement;
 	private loopToggleBtn: HTMLButtonElement;
 	private sectionList: HTMLElement;
 	private speedLabel: HTMLElement;
@@ -318,6 +325,7 @@ class AudioControls {
 		this.renderSections();
 		this.syncLoopUi();
 		this.syncPitchUi();
+		this.setCollapsed(plugin.settings.fileCollapsed[storageKey] ?? plugin.settings.collapseByDefault, false);
 		// Route it now rather than on play, so swapping in the local copy can't interrupt playback.
 		if (this.pitchCents !== 0) void this.applyPitch();
 		AudioControls.active = this;
@@ -456,6 +464,8 @@ class AudioControls {
 		this.seek.step = "0.01";
 		this.seek.value = "0";
 		this.timeLabel = transport.createSpan({ cls: "alp-time", text: "0:00 / 0:00" });
+		this.collapseBtn = transport.createEl("button", { cls: "alp-btn alp-icon-btn alp-collapse-btn" });
+		this.collapseBtn.addEventListener("click", () => this.setCollapsed(!this.isCollapsed(), true));
 
 		// --- Loop row: mark A/B on the selected section, jump to either end, toggle looping ---
 		const loopRow = root.createDiv({ cls: "alp-row alp-loop-row" });
@@ -826,6 +836,24 @@ class AudioControls {
 		void this.plugin.saveSettings();
 		this.syncPitchUi();
 		void this.applyPitch();
+	}
+
+	isCollapsed(): boolean {
+		return this.root.hasClass("is-collapsed");
+	}
+
+	/** Shrinks the player to just the transport row, or brings back every control. */
+	setCollapsed(collapsed: boolean, remember: boolean) {
+		this.root.toggleClass("is-collapsed", collapsed);
+		const label = collapsed ? "Show all controls" : "Collapse to mini-player";
+		setIcon(this.collapseBtn, collapsed ? "chevron-down" : "chevron-up");
+		this.collapseBtn.setAttr("aria-label", label);
+		this.collapseBtn.setAttr("aria-expanded", String(!collapsed));
+		if (!remember) return;
+		const store = this.plugin.settings.fileCollapsed;
+		if (collapsed === this.plugin.settings.collapseByDefault) delete store[this.storageKey];
+		else store[this.storageKey] = collapsed;
+		void this.plugin.saveSettings();
 	}
 
 	private syncPitchUi() {
@@ -1651,6 +1679,7 @@ export default class AudioLoopPlayerPlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		if (!this.settings.fileLoops) this.settings.fileLoops = {};
 		if (!this.settings.filePitch) this.settings.filePitch = {};
+		if (!this.settings.fileCollapsed) this.settings.fileCollapsed = {};
 	}
 
 	async saveSettings() {
@@ -1691,6 +1720,19 @@ class AudioLoopPlayerSettingTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.enhanceEmbeds);
 				toggle.onChange(async (value) => {
 					this.plugin.settings.enhanceEmbeds = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Start players collapsed")
+			.setDesc(
+				"Show new players as a mini-player (play, seek bar, time). Each player's collapse button still opens it, and files you've collapsed or expanded keep that choice."
+			)
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.collapseByDefault);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.collapseByDefault = value;
 					await this.plugin.saveSettings();
 				});
 			});

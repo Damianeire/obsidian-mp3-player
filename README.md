@@ -40,6 +40,10 @@ files opened in their own tab.
   concert pitch, or type any number of cents (100¢ = a semitone, up to ±1200¢).
   The pitch is remembered per audio file; the ↺ button resets it to 0. On
   desktop the file is read into memory the first time its pitch is changed.
+- **Collapse (chevron, top right)** — shrink the player to a mini-player with
+  just play/pause, the seek bar and the time; click again to show every
+  control. Remembered per audio file. Section marks and looping keep working
+  while collapsed.
 
 ## Sections from a note (`loops` code block)
 
@@ -129,8 +133,8 @@ Raise / lower pitch by 5 cents · Reset pitch.
 
 ## Settings
 
-Default playback speed, whether to enhance audio at all, the default pause
-between loops, and a button to forget all saved sections.
+Default playback speed, whether to enhance audio at all, whether players
+start collapsed as mini-players, the default pause between loops, and a button to forget all saved sections.
 
 ## Development
 
